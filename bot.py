@@ -1,22 +1,23 @@
 import os
 import time
-import pandas as pd
-import pandas_ta as ta
-import yfinance as yf
 import requests
+import yfinance as yf
+import pandas as pd
+from datetime import datetime
 
-# إعدادات بوت التليجرام (تأكد من وضع التوكن ورقم الكود الخاص بك أو ربطه بمتغيرات البيئة)
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID")
-
-# قائمة الأسهم والمؤشرات المستهدفة للمراقبة
-WATCHLIST = ["SPY", "QQQ", "TSLA", "NVDA", "AAPL"]
+# إعدادات بوت تيليجرام من متغيرات البيئة في ريلواي
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+# يمكنك وضع معرف الدردشة الخاص بك هنا أو جلبه ديناميكياً
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID") 
 
 def send_telegram_message(message):
-    """إرسال إشعار نصي عبر بوت التليجرام"""
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    if not TOKEN or not CHAT_ID:
+        print("Telegram token or chat ID is missing.")
+        return
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
+        "chat_icon": "📈",
+        "chat_id": CHAT_ID,
         "text": message,
         "parse_mode": "Markdown"
     }
@@ -24,74 +25,63 @@ def send_telegram_message(message):
         response = requests.post(url, json=payload)
         return response.json()
     except Exception as e:
-        print(f"خطأ في إرسال التنبيه: {e}")
+        print(f"Error sending message: {e}")
 
-def check_ichimoku_strategy(symbol):
-    """تحليل مؤشر الإشيموكو وفلتر خط الشيكو سبان للأسهم"""
-    try:
-        # جلب بيانات الشموع اليومية أو لكل ساعة
-        data = yf.download(symbol, period="60d", interval="1h", progress=False)
-        if data.empty:
-            return None
-
-        # حساب مؤشر الإشيموكو باستخدام pandas_ta
-        ichimoku = ta.ichimoku(data['High'], data['Low'], data['Close'])
-        
-        # أسماء الأعمدة الناتجة من الإشيموكو
-        tenkan_col = [c for c in ichimoku[0].columns if 'ITS' in c][0]
-        kijun_col = [c for c in ichimoku[0].columns if 'IKS' in c][0]
-        senkou_a_col = [c for c in ichimoku[0].columns if 'ISA' in c][0]
-        senkou_b_col = [c for c in ichimoku[0].columns if 'ISB' in c][0]
-        
-        df = data.copy()
-        df['Tenkan'] = ichimoku[0][tenkan_col]
-        df['Kijun'] = ichimoku[0][kijun_col]
-        df['Senkou_A'] = ichimoku[0][senkou_a_col]
-        df['Senkou_B'] = ichimoku[0][senkou_b_col]
-        
-        # الشيكو سبان (Chikou Span) - السعر الحالي مزاح للخلف، أو السعر السابق مقارنة بالسحابة
-        # كفلتر اتجاه: السعر الحالي يجب أن يكون خارج السحابة ويفضل فوقها للشراء
-        current_close = df['Close'].iloc[-1]
-        current_tenkan = df['Tenkan'].iloc[-1]
-        current_kijun = df['Kijun'].iloc[-1]
-        prev_tenkan = df['Tenkan'].iloc[-2]
-        prev_kijun = df['Kijun'].iloc[-2]
-        
-        senkou_a_val = df['Senkou_A'].iloc[-1]
-        senkou_b_val = df['Senkou_B'].iloc[-1]
-        upper_cloud = max(senkou_a_val, senkou_b_val)
-        lower_cloud = min(senkou_a_val, senkou_b_val)
-
-        # شروط التقاطع (Tenkan تقاطع Kijun) مع وجود السعر فوق السحابة
-        bullish_cross = (prev_tenkan < prev_kijun) and (current_tenkan > current_kijun)
-        above_cloud = current_close > upper_cloud
-
-        if bullish_cross and above_cloud:
-            msg = (
-                f"🚀 **إشارة إشيموكو إيجابية (BUY)** 🚀\n"
-                f"الرمز: `{symbol}`\n"
-                f"السعر الحالي: `{current_close:.2f}`\n"
-                f"الحالة: تقاطع Tenkan/Kijun للأعلى فوق سحابة الكومو السحابية."
-            )
-            send_telegram_message(msg)
-            return symbol
-
-    except Exception as e:
-        print(f"خطأ أثناء تحليل السهم {symbol}: {e}")
+def calculate_levels_and_percentages():
+    # الرمز المستهدف SPX (أو SPY كبديل بيانات حي)
+    ticker_symbol = "^GSPC" 
     
-    return None
-
-def main():
-    print("بدء تشغيل بوت الإشيموكو لمراقبة السوق...")
-    send_telegram_message("🟢 تم تشغيل بوت الإشيموكو بنجاح وجاهز للمراقبة.")
+    # الفريمات المطلوبة (تشمل الأسبوعي واليومي والفريمات اللحظية)
+    intervals = {
+        "خمس دقائق": {"period": "5d", "interval": "5m"},
+        "ربع ساعة": {"period": "5d", "interval": "15m"},
+        "ساعة": {"period": "1mo", "interval": "1h"},
+        "أربع ساعات": {"period": "2mo", "interval": "60m"}, # تجميعية أو ساعة
+        "يومي": {"period": "6mo", "interval": "1d"},
+        "أسبوعي": {"period": "1y", "interval": "1wk"}
+    }
     
-    while True:
-        for symbol in WATCHLIST:
-            check_ichimoku_strategy(symbol)
-            time.sleep(5)  # فاصل قصير بين كل سهم لتجنب الضغط على الخادم
-        
-        # الانتظار لمدة ساعة قبل الفحص القادم (أو حسب رغبتك)
-        time.sleep(3600)
+    report = "📊 *تقرير قمم ونسب الفريمات (SPX)* 📊\n\n"
+    
+    for frame_name, params in intervals.items():
+        try:
+            data = yf.download(ticker_symbol, period=params["period"], interval=params["interval"], progress=False)
+            if data.empty:
+                continue
+            
+            # التعامل مع الأعمدة المتاحة
+            high_col = 'High' if 'High' in data.columns else data.columns[1]
+            low_col = 'Low' if 'Low' in data.columns else data.columns[2]
+            close_col = 'Close' if 'Close' in data.columns else data.columns[4]
+            
+            highest_high = data[high_col].max()
+            lowest_low = data[low_col].min()
+            current_price = data[close_col].iloc[-1]
+            
+            # حساب النسبة المئوية للموقع الحالي بين القمة والقاع
+            range_val = highest_high - lowest_low
+            if range_val > 0:
+                position_pct = ((current_price - lowest_low) / range_val) * 100
+            else:
+                position_pct = 0.0
+                
+            report += f"🔹 *فريم {frame_name}:*\n"
+            report += f"   • السعر الحالي: `{current_price:.2f}`\n"
+            report += f"   • أعلى قمة: `{highest_high:.2f}`\n"
+            report += f"   • أدنى قاع: `{lowest_low:.2f}`\n"
+            report += f"   • النسبة: `{position_pct:.1f}%`\n\n"
+        except Exception as e:
+            print(f"Error processing {frame_name}: {e}")
+            
+    return report
 
 if __name__ == "__main__":
-    main()
+    print("Bot is running 24/7...")
+    while True:
+        msg = calculate_levels_and_percentages()
+        if CHAT_ID:
+            send_telegram_message(msg)
+        else:
+            print(msg) # للطباعة في السيرفر إذا لم يتم ضبط الـ Chat ID بعد
+        # يرسل تحديث دوري كل ساعة (أو يمكنك التحكم بالوقت)
+        time.sleep(3600)
