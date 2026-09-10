@@ -10,14 +10,11 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 def send_telegram_message(message):
-    if not TOKEN or not chat_id if 'chat_id' in locals() else not CHAT_ID: # حماية لمتغيرات الاتصال
-        pass
     if not TOKEN or not CHAT_ID:
-        print("Telegram token or chat ID is missing.")
+        print("Telegram token or chat ID is missing. Please check Railway Variables.")
         return
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {
-        "chat_icon": "📊",
         "chat_id": CHAT_ID,
         "text": message,
         "parse_mode": "Markdown"
@@ -29,17 +26,17 @@ def send_telegram_message(message):
         print(f"Error sending message: {e}")
 
 def calculate_levels_and_percentages():
-    # تحليل بيانات SPX أو SPY الرمز المستهدف
+    # تحليل بيانات مؤشر SPX المستهدف
     ticker_symbol = "^GSPC"
     
-    # الفريمات المطلوبة (تشمل الأسبوعي واليومي والفريمات اللحظية)
+    # الفريمات المطلوبة متوافقة تماماً مع قيود yfinance المسموحة
     intervals = {
         "خمس دقايق": {"period": "5d", "interval": "5m"},
         "ربع ساعة": {"period": "5d", "interval": "15m"},
-        "ساعة": {"period": "60mo", "interval": "60m"}, # تجميعة أو ساعة
-        "أربع ساعات": {"period": "2mo", "interval": "60m"},
+        "ساعة": {"period": "730d", "interval": "60m"},
+        "أربع ساعات": {"period": "730d", "interval": "60m"},
         "يومي": {"period": "6mo", "interval": "1d"},
-        "أسبوعي": {"period": "1y", "interval": "1wk"}
+        "أسبوعي": {"period": "2y", "interval": "1wk"}
     }
     
     report = f"📊 *تقرير قمم ونسب الفريمات لـ (SPX)*:\n\n"
@@ -51,7 +48,7 @@ def calculate_levels_and_percentages():
             if data is None or data.empty:
                 continue
                 
-            # التعامل مع الأعمدة المتعددة إذا وجدت في النسخ الحديثة من yfinance
+            # التعامل مع الأعمدة المتعددة في الإصدارات الحديثة
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = data.columns.get_level_values(0)
                 
@@ -75,6 +72,8 @@ def calculate_levels_and_percentages():
 
 if __name__ == "__main__":
     print("Bot is running 24/7...")
+    # تأخير بسيط للتأكد من استقرار الاتصال عند بدء التشغيل
+    time.sleep(5)
     while True:
         try:
             msg = calculate_levels_and_percentages()
@@ -82,5 +81,5 @@ if __name__ == "__main__":
                 send_telegram_message(msg)
         except Exception as e:
             print(f"Main loop error: {e}")
-        # ينتظر ساعة كاملة قبل إرسال التقرير التالي لتجنب الحظر
+        # الانتظار لمدة ساعة قبل التحديث التالي لتجنب الحظر
         time.sleep(3600)
