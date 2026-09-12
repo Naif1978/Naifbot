@@ -15,7 +15,7 @@ from telegram.ext import (
 import pandas as pd
 import yfinance as yf
 
-# إعداد السجلات
+# إعداد السجلات لمتابعة حالة البوت بدقة
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
@@ -43,39 +43,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
   chat_id = update.effective_chat.id
   logger.info(f"User {user_name} started the bot with chat_id: {chat_id}")
   await update.message.reply_text(
-      f"أهلاً بك يا أبو بدر ! البوت يعمل الآن بكامل ميزاته لفحص السوق"
+      f"أهلاً بك يا أبو بدر! البوت يعمل الآن بكامل ميزاته لفحص السوق"
       " والسحابة."
   )
 
 
 async def check_market(context: ContextTypes.DEFAULT_TYPE):
-  # دالة دورية لفحص الأسهم وإرسال التنبيهات
   logger.info("Running market check scheduler...")
 
 
-# إعداد الـ Scheduler الآمن الذي لا يسبب انهيار الـ event loop
+# إعداد المجدول الخلفي الآمن
 scheduler = BackgroundScheduler()
 
 
 def main():
-  TOKEN = os.getenv("TELEGRAM_TOKEN")
-  if not TOKEN:
-    logger.error("TELEGRAM_TOKEN is not set in environment variables!")
+  # ضع توكن البوت الحقيقي هنا بين علامتي التنصيص
+  TOKEN = "YOUR_BOT_TOKEN_HERE"
+
+  if not TOKEN or TOKEN == "YOUR_BOT_TOKEN_HERE":
+    logger.error("Please insert your actual Telegram bot token in the code!")
     return
 
   application = ApplicationBuilder().token(TOKEN).build()
 
-  # إضافة أوامر الرد
+  # إضافة معالجات الأوامر
   application.add_handler(CommandHandler("start", start))
 
-  # جدولة المهام الدورية
+  # جدولة المهام الدورية (كل 30 دقيقة)
   scheduler.add_job(
       check_market, "interval", minutes=30, args=[application]
   )
   scheduler.start()
   logger.info("Scheduler started successfully.")
 
-  # تشغيل البوت
+  # تشغيل البوت بسلاسة
   application.run_polling()
 
 
