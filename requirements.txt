@@ -1,3 +1,1 @@
-yfinance
-pandas
-python-telegram-bot
+ModuleNotFoundError: No module named 'apscheduler'
