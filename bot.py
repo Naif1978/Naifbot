@@ -25,11 +25,11 @@ async def check_market(context: ContextTypes.DEFAULT_TYPE):
     # هنا يتم وضع منطق فحص السوق والإرسال
 
 def main():
-    # التوكن المباشر للبوت
-    TOKEN = "8724416568:AAG4mXxDhorGt9rrgvk42SeWteVwwwgmUKA"
+    # سحب التوكن بأمان من متغيرات البيئة في المنصة (Railway)
+    TOKEN = os.getenv("TELEGRAM_TOKEN")
 
     if not TOKEN:
-        logger.error("Please set the Telegram bot token!")
+        logger.error("Please set the TELEGRAM_TOKEN environment variable!")
         return
 
     application = ApplicationBuilder().token(TOKEN).build()
