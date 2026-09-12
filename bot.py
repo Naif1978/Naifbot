@@ -18,8 +18,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(welcome_message)
 
-async def check_market(context: ContextTypes.DEFAULT_TYPE):
-    # دالة لفحص السوق الدورية
+async def check_market(context=None):
+    # دالة لفحص السوق الدورية (تم تعديلها لتقبل القيمة الفارغة لكي لا تتسبب بخطأ مع المجدول)
     logger.info("Running market check scheduler...")
     # هنا يتم وضع منطق فحص السوق والأرباح
 
@@ -39,7 +39,7 @@ def main():
     # إعداد المجدول الزمني
     scheduler = BackgroundScheduler()
     
-    # إضافة المهام الدورية (مثلاً كل 30 ثانية)
+    # إضافة المهام الدورية (كل 30 ثانية)
     scheduler.add_job(check_market, 'interval', seconds=30)
     
     scheduler.start()
