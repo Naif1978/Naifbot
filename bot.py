@@ -1,154 +1,140 @@
+import logging
 import os
-import datetime
+from datetime import datetime
 import pandas as pd
 import yfinance as yf
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
 
-TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+# إعداد السجلات
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
 
-# نسبة الاقتراب المبكر (0.5%) لتنبيهك بمسافة كافية جداً
-PROXIMITY_THRESHOLD = 0.005 
+# قائمة الأسهم القيادية والمؤشرات المفضلة
+WATCHLIST = ['^SPX', 'SPY', 'QQQ', 'AAPL', 'TSLA', 'NVDA']
 
-def check_market_status():
-    """التحقق مما إذا كان السوق في عطلة نهاية الأسبوع (السبت والأحد بتوقيت نيويورك/السوق الأمريكي)"""
-    # استخدام توقيت نيويورك لتحديد عطلة السوق بدقة
-    now_et = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-4))) # EDT تقريباً
-    weekday = now_et.weekday() # 5 = السبت، 6 = الأحد
-    if weekday in [5, 6]:
-        return "🔴 **حالة السوق:** مغلق حالياً (عطلة نهاية الأسبوع - السبت والأحد). البيانات المعروضة تعكس إغلاق يوم الجمعة الأخير."
-    return "🟢 **حالة السوق:** مفتوح أو في ساعات التداول/التسوية."
 
-def calculate_ichimoku_advanced_alerts(data):
-    """حساب الإيشيموكو مع تحديد لون السحابة ومراقبة اقتراب الخط المتأخر"""
-    if data.empty or len(data) < 52:
-        return None, None, None, None, [], "بيانات غير كافية"
+def calculate_volume_profile(df, bins=10):
+  """حساب نقطة تمركز السيولة الكبرى (POC)"""
+  try:
+    if df.empty or 'High' not in df.columns or 'Low' not in df.columns:
+      return 0, 0, 0
+    p_min, p_max = df['Low'].min(), df['High'].max()
+    if p_min == p_max:
+      return p_min, p_min, p_max
 
-    high_9 = data['High'].rolling(window=9).max()
-    low_9 = data['Low'].rolling(window=9).min()
-    tenkan_sen = (high_9 + low_9) / 2
+    df = df.copy()
+    df['Mid'] = (df['High'] + df['Low']) / 2
+    df['Bin'] = pd.cut(df['Mid'], bins=bins)
+    v_bin = df.groupby('Bin', observed=False)['Volume'].sum()
 
-    high_26 = data['High'].rolling(window=26).max()
-    low_26 = data['Low'].rolling(window=26).min()
-    kijun_sen = (high_26 + low_26) / 2
+    if v_bin.empty:
+      return df['Close'].iloc[-1], p_min, p_max
+    poc = v_bin.idxmax().mid if pd.notna(v_bin.idxmax()) else df['Close'].iloc[-1]
+    return round(poc, 2), round(p_min, 2), round(p_max, 2)
+  except Exception as e:
+    logger.error(f'Volume Profile Error: {e}')
+    return 0, 0, 0
 
-    senkou_span_a = (tenkan_sen + kijun_sen) / 2
 
-    high_52 = data['High'].rolling(window=52).max()
-    low_52 = data['Low'].rolling(window=52).min()
-    senkou_span_b = (high_52 + low_52) / 2
+def analyze_ichimoku(ticker_symbol):
+  try:
+    stock = yf.Ticker(ticker_symbol)
+    df = stock.history(period='5d', interval='15m')
 
-    close = data['Close'].iloc[-1]
-    tenkan = tenkan_sen.iloc[-1]
-    kijun = kijun_sen.iloc[-1]
-    
-    # السحابة المسقطة
-    span_a = senkou_span_a.shift(26).iloc[-1]
-    span_b = senkou_span_b.shift(26).iloc[-1]
+    if df.empty or len(df) < 52:
+      return f'❌ عذراً، البيانات غير كافية للرمز: {ticker_symbol.upper()}'
 
-    if pd.isna(span_a) or pd.isna(span_b):
-        span_a = senkou_span_a.iloc[-1]
-        span_b = senkou_span_b.iloc[-1]
+    # حساب مؤشر الإيشيموكو
+    df['Tenkan'] = (
+        df['High'].rolling(9).max() + df['Low'].rolling(9).min()
+    ) / 2
+    df['Kijun'] = (
+        df['High'].rolling(26).max() + df['Low'].rolling(26).min()
+    ) / 2
+    df['Senkou_A'] = ((df['Tenkan'] + df['Kijun']) / 2).shift(26)
+    df['Senkou_B'] = (
+        df['High'].rolling(52).max() + df['Low'].rolling(52).min()
+    ) / 2.shift(26)
 
-    cloud_top = max(span_a, span_b)
-    cloud_bottom = min(span_a, span_b)
+    last = df.iloc[-1]
+    price, tenkan, kijun = last['Close'], last['Tenkan'], last['Kijun']
+    sa, sb = last['Senkou_A'], last['Senkou_B']
+    poc, v_min, v_max = calculate_volume_profile(df)
 
-    # تحديد لون السحابة
-    if span_a > span_b:
-        cloud_color = "سحابة خضراء 🟢"
-    else:
-        cloud_color = "سحابة حمراء 🔴"
+    # التحقق من عطلة نهاية الأسبوع
+    is_weekend = datetime.utcnow().weekday() >= 5
+    market_status = (
+        '🔴 السوق مغلق (عطلة نهاية الأسبوع)'
+        if is_weekend
+        else '🟢 السوق مفتوح'
+    )
 
-    if close > cloud_top:
-        cloud_status = f"فوق السحابة ({cloud_color})"
-    elif close < cloud_bottom:
-        cloud_status = f"تحت السحابة ({cloud_color})"
-    else:
-        cloud_status = f"داخل السحابة ({cloud_color})"
+    # تحديد اتجاه الحالة (إيجابية أو سلبية)
+    trend_status = 'neutral'
+    cloud_desc = 'داخل السحابة (تذبذب وحياد)'
+    if pd.notna(sa) and pd.notna(sb):
+      upper_c, lower_c = max(sa, sb), min(sa, sb)
+      if price > upper_c and tenkan > kijun:
+        trend_status = 'bullish'
+        cloud_desc = 'فوق السحابة + تقاطع إيجابي 🟢'
+      elif price < lower_c and tenkan < kijun:
+        trend_status = 'bearish'
+        cloud_desc = 'تحت السحابة + تقاطع سلبي 🔴'
 
-    alerts = []
-    
-    # فحص اقتراب الخط المتأخر (Chikou Span)
-    if len(data) > 35:
-        historical_close_26 = data['Close'].iloc[-26]
-        historical_tenkan_26 = tenkan_sen.iloc[-26]
-        historical_kijun_26 = kijun_sen.iloc[-26]
+    signal_emoji = (
+        '🟢 إيجابية (صاعد)'
+        if trend_status == 'bullish'
+        else ('🔴 سلبية (هابط)' if trend_status == 'bearish' else '🟡 حيادية')
+    )
 
-        # 1. اقتراب الخط المتأخر من الشموع التاريخية
-        dist_to_price = abs(close - historical_close_26) / close
-        if dist_to_price <= PROXIMITY_THRESHOLD:
-            if close > historical_close_26:
-                alerts.append("⚠️ تنبيه مبكر: الخط المتأخر يوشك على اختراق الشموع من الأعلى!")
-            else:
-                alerts.append("⚠️ تنبيه مبكر: الخط المتأخر يوشك على كسر الشموع من الأسفل!")
+    report = f"""📊 **{ticker_symbol.upper()}** | {market_status}
+-----------------------------------
+⚖️ **الحالة:** {signal_emoji}
+• **السعر:** {price:.2f} | **السحابة:** {cloud_desc}
+• **التينكان:** {tenkan:.2f} | **الكيجون:** {kijun:.2f}
+• **نقطة السيولة (POC):** {poc} (النطاق: {v_min} - {v_max})
+"""
+    return report
 
-        # 2. اقتراب الخط المتأخر من خط التحويل (Tenkan)
-        if pd.notna(historical_tenkan_26):
-            dist_to_tenkan = abs(close - historical_tenkan_26) / close
-            if dist_to_tenkan <= PROXIMITY_THRESHOLD:
-                alerts.append(f"🎯 تنبيه قوي جداً: الخط المتأخر يقترب للغاية من خط التحويل (Tenkan) عند `{historical_tenkan_26:.2f}`!")
+  except Exception as e:
+    logger.error(f'Error analyzing {ticker_symbol}: {e}')
+    return f'حدث خطأ أثناء معالجة الرمز {ticker_symbol}.'
 
-        # 3. اقتراب الخط المتأخر من خط الأساس (Kijun)
-        if pd.notna(historical_kijun_26):
-            dist_to_kijun = abs(close - historical_kijun_26) / close
-            if dist_to_kijun <= PROXIMITY_THRESHOLD:
-                alerts.append(f"🎯 تنبيه قوي جداً: الخط المتأخر يقترب للغاية من خط الأساس (Kijun) عند `{historical_kijun_26:.2f}`!")
-
-    return close, tenkan, kijun, cloud_status, alerts, None
-
-def get_multi_timeframe_analysis(symbol):
-    market_note = check_market_status()
-    report = f"📊 **تحليل الإيشيموكو الشامل والخط المتأخر للرمز: {symbol.upper()}**\n"
-    report += f"{market_note}\n"
-    report += "━━━━━━━━━━━━━━━━━━━\n"
-
-    try:
-        raw_1h = yf.download(tickers=symbol, interval="1h", period="60d", progress=False)
-        if raw_1h.empty:
-            return f"❌ تعذر العثور على بيانات للرمز: {symbol.upper()}"
-        
-        if isinstance(raw_1h.columns, pd.MultiIndex):
-            raw_1h.columns = raw_1h.columns.get_level_values(0)
-
-        timeframes_data = {
-            "⏱ 15 دقيقة": yf.download(tickers=symbol, interval="15m", period="5d", progress=False),
-            "⏱ ساعة (1h)": raw_1h,
-            "⏱ 4 ساعات (4h)": raw_1h.resample('4h').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last'}).dropna(),
-            "⏱ 12 ساعة": raw_1h.resample('12h').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last'}).dropna(),
-            "📅 يومي (Daily)": yf.download(tickers=symbol, interval="1d", period="1y", progress=False),
-            "📈 أسبوعي (Weekly)": yf.download(tickers=symbol, interval="1wk", period="2y", progress=False)
-        }
-
-        for tf_name, df in timeframes_data.items():
-            if df.empty:
-                continue
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-
-            c, t, k, st, alerts_list, err = calculate_ichimoku_advanced_alerts(df)
-            if not err:
-                report += f"• **{tf_name}:** السعر `{c:.2f}` | التينكان `{t:.2f}` | الكيجون `{k:.2f}` | {st}\n"
-                for al in alerts_list:
-                    report += f"  └ {al}\n"
-
-        report += "\n🔍 *النظام يعمل 24/7 لمراقبة السحب والخط المتأخر.*"
-        return report
-
-    except Exception as e:
-        return f"حدث خطأ أثناء جلب وتحليل البيانات: {e}"
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip().upper()
-    if len(text) <= 6:
-        await update.message.reply_text("⏳ جاري سحب البيانات وفحص السحب والخط المتأخر...")
-        result = get_multi_timeframe_analysis(text)
-        await update.message.reply_text(result, parse_mode="Markdown")
+  text = update.message.text.strip()
+  await update.message.reply_text('⏳ جاري فحص السحابة والسيولة...')
+  result = analyze_ichimoku(text)
+  await update.message.reply_text(result, parse_mode='Markdown')
+
+
+async def watchlist_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  await update.message.reply_text(
+      '⏳ جاري فحص قائمة الأسهم القيادية والمؤشرات...'
+  )
+  full_report = '📈 **ملخص الأسهم القيادية والمؤشرات:**\n\n'
+  for ticker in WATCHLIST:
+    full_report += analyze_ichimoku(ticker) + '\n'
+  await update.message.reply_text(full_report, parse_mode='Markdown')
+
 
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
-    app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
-    app.run_polling()
+  TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+  if not TOKEN:
+    logger.error('TELEGRAM_BOT_TOKEN is missing!')
+    return
 
-if __name__ == "__main__":
-    print("🚀 البوت يعمل 24/7 ومزود بالتحقق من عطلة السوق...")
-    main()
+  app = ApplicationBuilder().token(TOKEN).build()
+  app.add_handler(CommandHandler('watchlist', watchlist_command))
+  app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+  logger.info('Bot is running...')
+  app.run_polling()
+
+
+if __name__ == '__main__':
+  main()
