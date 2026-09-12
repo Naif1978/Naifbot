@@ -1,3 +1,4 @@
+import os
 import logging
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
@@ -21,14 +22,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def check_market(context: ContextTypes.DEFAULT_TYPE):
     """دالة فحص السوق الدورية"""
     logger.info("Running market check scheduler...")
-    # هنا يتم وضع منطق فحص السوق والإرسال (مثل السحابة أو التنبيهات)
+    # هنا يتم وضع منطق فحص السوق والإرسال
 
 def main():
-    # توكن البوت الحقيقي
-    TOKEN = "8724416568:AAFXBsrKKEem5NuM9MKeo3Yb5FHbYe_B4IU"
+    # التوكن المباشر للبوت
+    TOKEN = "8724416568:AAG4mXxDhorGt9rrgvk42SeWteVwwwgmUKA"
 
-    if not TOKEN or TOKEN == "YOUR_BOT_TOKEN_HERE":
-        logger.error("Please insert your actual Telegram bot token in the code!")
+    if not TOKEN:
+        logger.error("Please set the Telegram bot token!")
         return
 
     application = ApplicationBuilder().token(TOKEN).build()
@@ -47,7 +48,7 @@ def main():
     scheduler.start()
     logger.info("Scheduler started successfully.")
 
-    # تشغيل البوت بأمان
+    # تشغيل البوت
     application.run_polling()
 
 if __name__ == "__main__":
