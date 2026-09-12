@@ -1,4 +1,5 @@
+python-telegram-bot
+requests
 pandas
 pandas-ta
-requests
-python-telegram-bot
+pytz
