@@ -4,8 +4,7 @@ import threading
 import requests
 import pandas as pd
 import pandas_ta as ta
-from datetime import datetime
-import pytz
+from datetime import datetime, timezone, timedelta
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from telegram import Bot
@@ -15,22 +14,13 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 bot_client = Bot(token=TOKEN)
 
 def get_market_session_status():
-    # ضبط التوقيت حسب توقيت السعودية أو التوقيت العالمي (ET للأسواق الأمريكية)
-    sa_tz = pytz.timezone('Asia/Riyadh')
+    sa_tz = timezone(timedelta(hours=3))
     now = datetime.now(sa_tz)
-    current_time_str = now.strftime('%H:%M')
-    
-    # تحديد الجلسة الحالية بناءً على التوقيت
-    # جلسة آسيا (طوكيو): تقريباً من 3:00 ص إلى 11:00 ص بتوقيت السعودية
-    # جلسة لندن (أوروبا): تقريباً من 10:00 ص إلى 7:00 م بتوقيت السعودية
-    # جلسة أمريكا (نيويورك): افتتاح 4:30 م إلى 11:00 م (أو حسب توقيت الشتوية/الصيفية)
-    
     hour = now.hour
     minute = now.minute
     total_minutes = hour * 60 + minute
     
     session_info = "🌍 *حالة الجلسات العالمية الحالية:*\n"
-    
     if 180 <= total_minutes < 660:
         session_info += "• الجلسة النشطة حالياً: 🟢 **آسيا (طوكيو)** - سيولة هادئة وتأسيس نطاق."
     elif 600 <= total_minutes < 1140:
@@ -39,7 +29,6 @@ def get_market_session_status():
         session_info += "• الجلسة النشطة حالياً: 🟢 **أمريكا (نيويورك)** - السيولة الكبرى والحرارة العالية 🔥."
     else:
         session_info += "• حالة السوق: 🟡 **فترة بين الجلسات / إغلاق رئيسي**."
-        
     return session_info
 
 def analyze_timeframe(interval_str, timeframe_name):
@@ -48,7 +37,7 @@ def analyze_timeframe(interval_str, timeframe_name):
             range_val = "5d"
         elif interval_str in ["1h", "4h"]:
             range_val = "60d"
-        elif interval_str in ["12h", "1d"]:
+        elif interval_str in ["1d"]:
             range_val = "1y"
         else:
             range_val = "max"
@@ -82,6 +71,28 @@ def analyze_timeframe(interval_str, timeframe_name):
         senkou_a = latest.get('ISA_9', 0)
         senkou_b = latest.get('ISB_26', 0)
         
+        diff = abs(tenkan - kijun)
+        price_threshold = close_price * 0.0015
+        
+        df['tenkan_above'] = df['ITS_9'] > df['IKS_26']
+        df['cross_change'] = df['tenkan_above'] != df['tenkan_above'].shift(1)
+        cross_indices = df.index[df['cross_change']].tolist()
+        
+        if cross_indices:
+            last_cross_idx = cross_indices[-1]
+            candles_since_cross = len(df) - 1 - df.index.get_loc(last_cross_idx)
+        else:
+            candles_since_cross = 999
+
+        if candles_since_cross == 0:
+            cross_status = "⚡ تقاطع حدث للتو في هذه الشمعة!"
+        elif diff <= price_threshold:
+            cross_status = f"⚠️ *تنبيه مبكر:* الخطين متقاربين جداً والتقاطع وشيك على هذا الفريم!"
+        elif candles_since_cross <= 5:
+            cross_status = f"✅ تقاطع قائم ومستقر منذ {candles_since_cross} شمعات."
+        else:
+            cross_status = f"⏳ التقاطع صار له فترة ({candles_since_cross} شمعة)."
+
         chikou = 0
         ics_cols = [col for col in df.columns if col.startswith('ICS')]
         if ics_cols and not pd.isna(latest.get(ics_cols[0])):
@@ -106,6 +117,7 @@ def analyze_timeframe(interval_str, timeframe_name):
             f"📌 *الفريم: {timeframe_name}*\n"
             f"• *السعر:* `{close_price:.2f}` | *الاتجاه:* {trend}\n"
             f"• *السحابة:* {cloud_color} ({cloud_status})\n"
+            f"• *حالة التقاطع:* {cross_status}\n"
             f"• *Chikou:* `{chikou:.2f}` | *Tenkan:* `{tenkan:.2f}` | *Kijun:* `{kijun:.2f}`\n"
         )
         return report
@@ -117,7 +129,6 @@ def get_full_analysis():
     msg_15m = analyze_timeframe("15m", "15 دقيقة (لحظي)")
     msg_1h = analyze_timeframe("1h", "الساعة (1H)")
     msg_4h = analyze_timeframe("4h", "4 ساعات (4H)")
-    msg_12h = analyze_timeframe("12h", "12 ساعة (12H)")
     msg_1d = analyze_timeframe("1d", "اليومي (Daily)")
     msg_1wk = analyze_timeframe("1wk", "الأسبوعي (Weekly)")
     
@@ -129,7 +140,6 @@ def get_full_analysis():
         f"{msg_15m}\n-----------------------------------\n"
         f"{msg_1h}\n-----------------------------------\n"
         f"{msg_4h}\n-----------------------------------\n"
-        f"{msg_12h}\n-----------------------------------\n"
         f"{msg_1d}\n-----------------------------------\n"
         f"{msg_1wk}"
     )
@@ -147,7 +157,7 @@ def background_monitor():
         time.sleep(900)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("البوت يعمل، وتم تفعيل حالة جلسات أسيا، لندن، وأمريكا مع جميع الفريمات.")
+    await update.message.reply_text("البوت يعمل بنجاح، وتمت إزالة فريم 6 ساعات.")
 
 async def spx_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     report = get_full_analysis()
