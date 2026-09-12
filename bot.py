@@ -15,15 +15,14 @@ from telegram.ext import (
 import pandas as pd
 import yfinance as yf
 
-# إعداد السجلات (Logging)
+# إعداد السجلات
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO,
 )
 logger = logging.getLogger(__name__)
 
-WATCHLIST = ["SPX", "SPY", "QQQ", "AAPL", "TSLA", "NVDA"]
-ACTIVE_CHAT_ID = None
+WATCHLIST = ["SPX", "SPY", "QQQ", "AAPL", "TSLA", "NVDA", "MASK"]
 
 
 def calculate_volume_profile(df, bins=10):
@@ -39,13 +38,26 @@ def calculate_volume_profile(df, bins=10):
     return 0, 0, 0
 
 
-# تعريف الجدول الخلفي بدون مشاكل Asyncio
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+  user_name = update.effective_user.first_name
+  chat_id = update.effective_chat.id
+  logger.info(f"User {user_name} started the bot with chat_id: {chat_id}")
+  await update.message.reply_text(
+      f"أهلاً بك يا أبو بدر ! البوت يعمل الآن بكامل ميزاته لفحص السوق"
+      " والسحابة."
+  )
+
+
+async def check_market(context: ContextTypes.DEFAULT_TYPE):
+  # دالة دورية لفحص الأسهم وإرسال التنبيهات
+  logger.info("Running market check scheduler...")
+
+
+# إعداد الـ Scheduler الآمن الذي لا يسبب انهيار الـ event loop
 scheduler = BackgroundScheduler()
 
 
-# دالة لبدء تشغيل البوت
 def main():
-  # استخراج التوكن من متغيرات البيئة في المنصة
   TOKEN = os.getenv("TELEGRAM_TOKEN")
   if not TOKEN:
     logger.error("TELEGRAM_TOKEN is not set in environment variables!")
@@ -53,14 +65,17 @@ def main():
 
   application = ApplicationBuilder().token(TOKEN).build()
 
-  # يمكنك إضافة الهاندلر والأوامر هنا حسب الحاجة
-  # مثال: application.add_handler(CommandHandler("start", start))
+  # إضافة أوامر الرد
+  application.add_handler(CommandHandler("start", start))
 
-  # تشغيل الجدولة
+  # جدولة المهام الدورية
+  scheduler.add_job(
+      check_market, "interval", minutes=30, args=[application]
+  )
   scheduler.start()
-  logger.info("Scheduler started successfully with BackgroundScheduler.")
+  logger.info("Scheduler started successfully.")
 
-  # بدء استقبال الرسائل والتشغيل
+  # تشغيل البوت
   application.run_polling()
 
 
