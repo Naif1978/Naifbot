@@ -44,12 +44,23 @@ def analyze_timeframe(symbol, interval_str, timeframe_name):
 
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval_str}&range={range_val}"
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(url, headers=headers)
+        
+        # إضافة مهلة زمنية 7 ثواني لمنع التعليق
+        response = requests.get(url, headers=headers, timeout=7)
+        if response.status_code != 200:
+            return f"📌 *الفريم: {timeframe_name}*\n❌ تعذر جلب البيانات (رمز غير صحيح أو ضغط بالسيرفر).\n"
+            
         data = response.json()
         
+        if 'chart' not in data or not data['chart']['result']:
+            return f"📌 *الفريم: {timeframe_name}*\n❌ البيانات غير متوفرة لهذا الرمز.\n"
+
         result = data['chart']['result'][0]
-        timestamps = result['timestamp']
+        timestamps = result.get('timestamp')
         quotes = result['indicators']['quote'][0]
+        
+        if not timestamps:
+            return f"📌 *الفريم: {timeframe_name}*\n❌ لا توجد شموع متاحة.\n"
         
         df = pd.DataFrame({
             'timestamp': timestamps,
@@ -59,6 +70,9 @@ def analyze_timeframe(symbol, interval_str, timeframe_name):
             'close': quotes['close'],
             'volume': quotes['volume']
         }).dropna()
+
+        if len(df) < 30:
+            return f"📌 *الفريم: {timeframe_name}*\n⚠️ البيانات غير كافية لحساب الإيتشيموكو.\n"
 
         ichimoku_df, span = ta.ichimoku(df['high'], df['low'], df['close'])
         df = pd.concat([df, ichimoku_df], axis=1)
@@ -111,7 +125,7 @@ def analyze_timeframe(symbol, interval_str, timeframe_name):
             
         cloud_color = "خضراء 🟢" if senkou_a > senkou_b else "حمراء 🔴"
         cloud_thickness = abs(senkou_a - senkou_b)
-        cloud_status = "ضعيفة (مناسبة للدخول)" if cloud_thickness < 15 else "قوية"
+        cloud_status = "ضعيفة (مناسبة للدخول)" if cloud_thickness < (close_price * 0.002) else "قوية"
 
         report = (
             f"📌 *الفريم: {timeframe_name}*\n"
@@ -122,7 +136,7 @@ def analyze_timeframe(symbol, interval_str, timeframe_name):
         )
         return report
     except Exception as e:
-        return f"📌 *الفريم: {timeframe_name}*\n❌ خطأ في جلب البيانات: {e}\n"
+        return f"📌 *الفريم: {timeframe_name}*\n❌ خطأ في المعالجة: {str(e)[:50]}\n"
 
 def get_full_analysis(symbol):
     sessions_status = get_market_session_status()
@@ -148,10 +162,10 @@ def get_full_analysis(symbol):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "أهلاً بك يا أبو بدر! البوت يعمل بكامل كفاءته.\n\n"
+        "أهلاً بك يا أبو بدر! البوت يعمل بكامل كفاءته وسرعته.\n\n"
         "الأوامر المتاحة:\n"
         "• `/spx` - لتحليل مؤشر S&P 500\n"
-        "• `/stock tsla` (أو أي رمز) - لتحليل أي سهم آخر لحظياً."
+        "• `/stock tsla` (أو أي رمز) - لتحليل أي سهم آخر فوراً."
     )
 
 async def spx_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -164,7 +178,7 @@ async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     symbol = context.args[0].upper()
-    await update.message.reply_text(f"🔍 جاري جلب وتحليل بيانات السهم: `{symbol}`...", parse_mode="Markdown")
+    await update.message.reply_text(f"🔍 جاري فحص السهم: `{symbol}`...", parse_mode="Markdown")
     report = get_full_analysis(symbol)
     await update.message.reply_text(report, parse_mode="Markdown")
 
