@@ -31,7 +31,7 @@ def get_market_session_status():
         session_info += "• حالة السوق: 🟡 **فترة بين الجلسات / إغلاق رئيسي**."
     return session_info
 
-def analyze_timeframe(interval_str, timeframe_name):
+def analyze_timeframe(symbol, interval_str, timeframe_name):
     try:
         if interval_str in ["15m"]:
             range_val = "5d"
@@ -42,7 +42,7 @@ def analyze_timeframe(interval_str, timeframe_name):
         else:
             range_val = "max"
 
-        url = f"https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?interval={interval_str}&range={range_val}"
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval={interval_str}&range={range_val}"
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers)
         data = response.json()
@@ -122,18 +122,19 @@ def analyze_timeframe(interval_str, timeframe_name):
         )
         return report
     except Exception as e:
-        return f"📌 *الفريم: {timeframe_name}*\n❌ خطأ في الجلب: {e}\n"
+        return f"📌 *الفريم: {timeframe_name}*\n❌ خطأ في جلب البيانات: {e}\n"
 
-def get_full_analysis():
+def get_full_analysis(symbol):
     sessions_status = get_market_session_status()
-    msg_15m = analyze_timeframe("15m", "15 دقيقة (لحظي)")
-    msg_1h = analyze_timeframe("1h", "الساعة (1H)")
-    msg_4h = analyze_timeframe("4h", "4 ساعات (4H)")
-    msg_1d = analyze_timeframe("1d", "اليومي (Daily)")
-    msg_1wk = analyze_timeframe("1wk", "الأسبوعي (Weekly)")
+    msg_15m = analyze_timeframe(symbol, "15m", "15 دقيقة (لحظي)")
+    msg_1h = analyze_timeframe(symbol, "1h", "الساعة (1H)")
+    msg_4h = analyze_timeframe(symbol, "4 ساعات (4H)")
+    msg_1d = analyze_timeframe(symbol, "1d", "اليومي (Daily)")
+    msg_1wk = analyze_timeframe(symbol, "1wk", "الأسبوعي (Weekly)")
     
+    clean_symbol = symbol.replace("^", "")
     full_msg = (
-        f"📊 *تقرير مؤشر SPX وجلسات الأسواق (إيتشيموكو)*\n"
+        f"📊 *تقرير السهم / المؤشر: {clean_symbol.upper()} (إيتشيموكو)*\n"
         f"===================================\n"
         f"{sessions_status}\n"
         f"-----------------------------------\n"
@@ -145,31 +146,33 @@ def get_full_analysis():
     )
     return full_msg
 
-def background_monitor():
-    time.sleep(15)
-    while True:
-        try:
-            msg = "⚠️ *تنبيه دوري لحالة الأسواق والفريمات*:\n\n" + get_full_analysis()
-            if CHAT_ID:
-                bot_client.send_message(chat_id=CHAT_ID, text=msg, parse_mode="Markdown")
-        except Exception as e:
-            print(f"خطأ في المراقبة: {e}")
-        time.sleep(900)
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("البوت يعمل بنجاح، وتمت إزالة فريم 6 ساعات.")
+    await update.message.reply_text(
+        "أهلاً بك يا أبو بدر! البوت يعمل بكامل كفاءته.\n\n"
+        "الأوامر المتاحة:\n"
+        "• `/spx` - لتحليل مؤشر S&P 500\n"
+        "• `/stock tsla` (أو أي رمز) - لتحليل أي سهم آخر لحظياً."
+    )
 
 async def spx_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    report = get_full_analysis()
+    report = get_full_analysis("^GSPC")
+    await update.message.reply_text(report, parse_mode="Markdown")
+
+async def stock_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("⚠️ يا لغالي، أرجو إدخال رمز السهم بعد الأمر. مثال:\n`/stock tsla` أو `/stock aapl`", parse_mode="Markdown")
+        return
+    
+    symbol = context.args[0].upper()
+    await update.message.reply_text(f"🔍 جاري جلب وتحليل بيانات السهم: `{symbol}`...", parse_mode="Markdown")
+    report = get_full_analysis(symbol)
     await update.message.reply_text(report, parse_mode="Markdown")
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("spx", spx_command))
-    
-    t = threading.Thread(target=background_monitor, daemon=True)
-    t.start()
+    app.add_handler(CommandHandler("stock", stock_command))
     
     app.run_polling()
 
