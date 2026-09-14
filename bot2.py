@@ -1,18 +1,18 @@
+
 import os
 import time
 import requests
 
-# طباعة تأكيد بداية التشغيل لضمان ظهورها في سجلات رايلواي
-print("🚀 Naif Edge Bot is starting up...", flush=True)
+print("Naif Edge bot is starting up...", flush=True)
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 POLYGON_API_KEY = os.getenv("POLYGON_API_KEY")
 
-print(f"Token loaded: {'Yes' if TELEGRAM_TOKEN else 'No'}", flush=True)
+print(f"Telegram API loaded: {'Yes' if TELEGRAM_TOKEN else 'No'}", flush=True)
 print(f"Polygon API loaded: {'Yes' if POLYGON_API_KEY else 'No'}", flush=True)
 
-# باقي الكود الموجود عندك
-TOKEN = "..." 
+# باقي الكود الأساسي والتوكن
+TOKEN = "..."
 CHAT_ID = "..."
 
 def send_telegram_alert(message):
@@ -24,6 +24,13 @@ def send_telegram_alert(message):
     except Exception as e:
         print(f"خطأ في إرسال التنبيه: {e}", flush=True)
 
-def check_ichimoku_breakout_15m(df):
-    # حسابات الإشيموكو والبيانات
+def check_ichimoku_tframe_15min():
+    # استخدام الرمز الرسمي للمؤشر في بوليغون مع بادئة I:
+    ticker = "I:SPX"
+    # هنا يتم استدعاء بيانات الشموع من بوليغون...
     pass
+
+if __name__ == "__main__":
+    while True:
+        check_ichimoku_tframe_15min()
+        time.sleep(900)
